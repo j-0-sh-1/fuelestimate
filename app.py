@@ -1,7 +1,21 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import os
+from pymongo import MongoClient
+
+# MongoDB Connection
+MONGO_URI = ("mongodb+srv://joshuailangovansamuel:HHXm1xKAsKxZtQ6I@"
+             "cluster0.pbvcd.mongodb.net/fuel_records?retryWrites=true&w=majority&appName=Cluster0")
+client = MongoClient(MONGO_URI)
+try:
+    client.admin.command('ping')
+    st.sidebar.success("MongoDB Connected!")
+except Exception as e:
+    st.sidebar.error("MongoDB connection error: " + str(e))
+
+# Database and collection
+db = client["fuel_records"]
+submissions_collection = db["submissions"]
 
 # Title of the app
 st.title("Fuel Tracker App")
@@ -28,31 +42,27 @@ else:
         st.success(f"You can drive up to **{km_till_refuel:.2f} km** with {fuel_filled} liters.")
         st.info(f"Refuel when your odometer reaches approximately **{km_till_refuel:.2f} km**.")
 
-        # Save data to CSV
-        data = {
-            "Date": [reading_date.strftime("%Y-%m-%d")],
-            "Current_KM": [current_km],
-            "Mileage_km_per_L": [mileage],
-            "Fuel_Filled_L": [fuel_filled],
-            "Max_KM": [km_till_refuel]
+        # Save data to MongoDB
+        submission = {
+            "date": reading_date.strftime("%Y-%m-%d"),
+            "current_km": current_km,
+            "mileage_km_per_l": mileage,
+            "fuel_filled_l": fuel_filled,
+            "max_km": km_till_refuel,
+            "timestamp": datetime.now().isoformat()  # For sorting purposes
         }
-        df = pd.DataFrame(data)
-
-        # Append to file if it exists, otherwise create new
-        file_path = "fuel_records.csv"
-        if os.path.exists(file_path):
-            existing_df = pd.read_csv(file_path)
-            updated_df = pd.concat([existing_df, df], ignore_index=True)
-            updated_df.to_csv(file_path, index=False)
-        else:
-            df.to_csv(file_path, index=False)
-
-        st.write("Data saved successfully!")
+        submissions_collection.insert_one(submission)
+        st.write("Data saved to MongoDB successfully!")
 
 # Show past records
 st.header("Past Fuel Records")
-if os.path.exists("fuel_records.csv"):
-    records = pd.read_csv("fuel_records.csv")
-    st.dataframe(records)
+records = submissions_collection.find().sort("timestamp", -1)  # Sort by latest first
+records_list = list(records)  # Convert cursor to list
+
+if records_list:
+    # Convert to DataFrame for display
+    df = pd.DataFrame(records_list)
+    df = df.drop(columns=["_id", "timestamp"])  # Hide MongoDB ID and timestamp
+    st.dataframe(df)
 else:
     st.write("No records yet. Calculate something to start!")
